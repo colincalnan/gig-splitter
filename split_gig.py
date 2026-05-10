@@ -265,6 +265,9 @@ def identify_songs(songs_info: list) -> list:
         base = os.path.splitext(os.path.basename(p))[0]
         if re.fullmatch(rf"song_{num:02d}", base):
             needs_id.append((num, s, e, p))
+        elif re.fullmatch(rf"song_{num:02d}_unknown", base):
+            print(f"  Song {num}: previously unidentifiable — skipping", flush=True)
+            path_map[num] = p
         else:
             print(f"  Song {num}: already identified ({base}) — skipping", flush=True)
             path_map[num] = p
@@ -334,8 +337,13 @@ def identify_songs(songs_info: list) -> list:
                 path_map[song_num] = new_path
                 continue
 
-        print(f"  Song {song_num}: could not identify — leaving as {os.path.basename(video_path)}", flush=True)
-        path_map[song_num] = video_path
+        unknown_path = os.path.join(
+            os.path.dirname(video_path),
+            f"song_{song_num:02d}_unknown{os.path.splitext(video_path)[1]}"
+        )
+        os.rename(video_path, unknown_path)
+        print(f"  Song {song_num}: could not identify — renamed to {os.path.basename(unknown_path)}", flush=True)
+        path_map[song_num] = unknown_path
 
     return [(num, s, e, path_map.get(num, p)) for num, s, e, p in songs_info]
 
@@ -425,9 +433,9 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30,
             print(f"  Song {song_num}: file not found at {video_path}, skipping", flush=True)
             continue
 
-        # Skip unidentified songs (still have plain song_NN.EXT name)
+        # Skip unidentified songs (plain song_NN.EXT) and known-unidentifiable (song_NN_unknown.EXT)
         basename = os.path.splitext(os.path.basename(video_path))[0]
-        if re.fullmatch(rf"song_{song_num:02d}", basename):
+        if re.fullmatch(rf"song_{song_num:02d}(_unknown)?", basename):
             print(f"  Song {song_num}: not identified — skipping reel", flush=True)
             continue
 
