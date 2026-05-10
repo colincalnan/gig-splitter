@@ -16,6 +16,7 @@ Phase 1: analyses the first 15 minutes and shows a plot of the energy curve
 import sys
 import os
 import re
+import json
 import asyncio
 import subprocess
 import numpy as np
@@ -313,11 +314,25 @@ def identify_with_claude(transcript: str, song_num: int):
 
 def identify_songs(songs_info: list) -> list:
     """Returns updated songs_info with current file paths after renaming."""
-    print("\nIdentifying songs via Shazam...")
-    shazam_results = asyncio.run(_identify_all(songs_info))
+    path_map = {}
+    needs_id = []
+    for num, s, e, p in songs_info:
+        base = os.path.splitext(os.path.basename(p))[0]
+        if re.fullmatch(rf"song_{num:02d}", base):
+            needs_id.append((num, s, e, p))
+        else:
+            print(f"  Song {num}: already identified ({base}) — skipping", flush=True)
+            path_map[num] = p
 
-    # Build path map from shazam results (files may have been renamed)
-    path_map = {num: path for num, title, artist, path in shazam_results}
+    if not needs_id:
+        print("All songs already identified.", flush=True)
+        return songs_info
+
+    print(f"\nIdentifying {len(needs_id)} song(s) via Shazam...")
+    shazam_results = asyncio.run(_identify_all(needs_id))
+
+    for num, title, artist, path in shazam_results:
+        path_map[num] = path
 
     unmatched = [(num, path) for num, title, artist, path in shazam_results if title is None]
     if unmatched:
@@ -648,13 +663,31 @@ def main():
         create_social_clips(songs_info, reels_dir, max_reels=max_reels)
         return
 
-    audio_path = os.path.join(out_dir, "gig_audio_full.mp3")
-    extract_audio(video_path, audio_path, PREVIEW_SECONDS)
-    normalized, times, songs, threshold = detect_songs(audio_path, threshold)
+    audio_path     = os.path.join(out_dir, "gig_audio_full.mp3")
+    songs_json     = os.path.join(out_dir, "gig_songs.json")
+    plot_path      = os.path.join(out_dir, "gig_energy_plot.png")
+
+    if os.path.exists(audio_path):
+        print(f"[1/4] Audio already extracted — skipping ({os.path.basename(audio_path)})", flush=True)
+    else:
+        extract_audio(video_path, audio_path, PREVIEW_SECONDS)
+
+    if os.path.exists(songs_json):
+        with open(songs_json) as f:
+            data = json.load(f)
+        songs = [tuple(s) for s in data["songs"]]
+        print(f"[2-3/4] Song timestamps loaded from cache ({len(songs)} songs, threshold={data['threshold']}) — skipping detection", flush=True)
+        if os.path.exists(plot_path):
+            print(f"        Plot already exists — skipping", flush=True)
+    else:
+        normalized, times, songs, threshold = detect_songs(audio_path, threshold)
+        with open(songs_json, "w") as f:
+            json.dump({"threshold": threshold, "songs": [list(s) for s in songs]}, f)
+        plot_results(normalized, times, songs, threshold, out_dir)
+
     if max_songs:
         print(f"Limiting to first {max_songs} song(s)", flush=True)
         songs = songs[:max_songs]
-    plot_results(normalized, times, songs, threshold, out_dir)
     print_results(songs)
     songs_info = extract_songs(video_path, songs, out_dir)
     songs_info = identify_songs(songs_info)
