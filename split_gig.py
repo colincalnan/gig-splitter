@@ -461,7 +461,8 @@ def generate_ass(words_flat: list, clip_start: float, clip_length: int, output_p
 
 def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30, max_reels: int = None) -> None:
     print(f"\nCreating Instagram reels → {reels_dir}", flush=True)
-    model = whisper.load_model("medium")
+    print("Loading Whisper small model for word timestamps (faster than medium, cached)...", flush=True)
+    model = whisper.load_model("small")
 
     reels_made = 0
     for song_num, start, end, video_path in songs_info:
@@ -495,18 +496,24 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30,
 
         print(f"\n  [{song_num}] {os.path.basename(video_path)}", flush=True)
 
-        # Full transcription with word-level timestamps
-        print(f"    Transcribing for word timestamps...", flush=True)
+        # Transcribe a 90s window starting at 25% in — enough to catch the chorus
+        # without processing the whole song
+        sample_offset = min(song_duration * 0.25, song_duration - 90)
+        sample_offset = max(0.0, sample_offset)
+        print(f"    Transcribing 90s from {sample_offset:.0f}s for word timestamps...", flush=True)
         subprocess.run([
-            "ffmpeg", "-y", "-i", video_path,
+            "ffmpeg", "-y",
+            "-ss", str(sample_offset), "-t", "90",
+            "-i", video_path,
             "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", tmp_wav
         ], capture_output=True)
         result = model.transcribe(tmp_wav, language="en", fp16=False, word_timestamps=True)
         if os.path.exists(tmp_wav):
             os.remove(tmp_wav)
 
+        # Adjust word timestamps back to be relative to the song file start
         words_flat = [
-            {"word": w["word"], "start": w["start"], "end": w["end"]}
+            {"word": w["word"], "start": w["start"] + sample_offset, "end": w["end"] + sample_offset}
             for seg in result["segments"]
             for w in seg.get("words", [])
         ]
