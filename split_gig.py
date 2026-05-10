@@ -17,14 +17,12 @@ import sys
 import os
 import re
 import json
-import asyncio
 import subprocess
 import numpy as np
 import librosa
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import whisper
-from shazamio import Shazam
 
 PREVIEW_SECONDS  = None   # None = full file
 MIN_SONG_SECONDS = 90    # ignore segments shorter than this
@@ -213,59 +211,6 @@ def extract_songs(video_path: str, songs: list, out_dir: str) -> list:
     return out_paths
 
 
-async def _identify_one(shazam: Shazam, sample_path: str):
-    try:
-        result = await shazam.recognize(sample_path)
-        matches = result.get("matches", [])
-        if matches:
-            track = result.get("track", {})
-            title  = track.get("title", "Unknown")
-            artist = track.get("subtitle", "Unknown")
-            return title, artist
-    except Exception as e:
-        return None, str(e)
-    return None, "No match"
-
-
-async def _identify_all(songs_info: list) -> list:
-    shazam = Shazam()
-    results = []
-    for song_num, start, end, video_path in songs_info:
-        ext = os.path.splitext(video_path)[1]
-        sample_path = video_path.replace(ext, "_sample.wav")
-
-        # Seek relative to the song file (which starts at 0, not the original video offset)
-        song_duration = end - start
-        sample_start = min(40, song_duration * 0.3)  # skip intro/banter, stay in first third
-        subprocess.run([
-            "ffmpeg", "-y",
-            "-ss", str(sample_start), "-t", "30",
-            "-i", video_path,
-            "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1",
-            sample_path
-        ], capture_output=True)
-        size = os.path.getsize(sample_path) if os.path.exists(sample_path) else 0
-        print(f"    sample: {sample_start:.0f}s offset, {size//1000}KB", flush=True)
-
-        print(f"  Identifying song {song_num}...", flush=True)
-        title, artist = await _identify_one(shazam, sample_path)
-        if os.path.exists(sample_path):
-            os.remove(sample_path)
-
-        if title:
-            print(f"  Song {song_num}: \"{title}\" by {artist}", flush=True)
-            # Rename the video file to artist - title
-            safe = re.sub(r'[^\w\s-]', '', f"{artist} - {title}").strip()
-            safe = re.sub(r'\s+', '_', safe)
-            new_path = os.path.join(os.path.dirname(video_path), f"song_{song_num:02d}_{safe}{os.path.splitext(video_path)[1]}")
-            os.rename(video_path, new_path)
-            print(f"  Renamed → {os.path.basename(new_path)}", flush=True)
-            results.append((song_num, title, artist, new_path))
-        else:
-            print(f"  Song {song_num}: no match ({artist})", flush=True)
-            results.append((song_num, None, None, video_path))
-    return results
-
 
 def find_chorus(transcript: str) -> str:
     """Find the most-repeated short phrase — almost always the chorus hook."""
@@ -313,7 +258,7 @@ def identify_with_claude(transcript: str, song_num: int):
 
 
 def identify_songs(songs_info: list) -> list:
-    """Returns updated songs_info with current file paths after renaming."""
+    """Identify unrecognised songs via Whisper transcription + Claude. Returns updated songs_info."""
     path_map = {}
     needs_id = []
     for num, s, e, p in songs_info:
@@ -328,76 +273,70 @@ def identify_songs(songs_info: list) -> list:
         print("All songs already identified.", flush=True)
         return songs_info
 
-    print(f"\nIdentifying {len(needs_id)} song(s) via Shazam...")
-    shazam_results = asyncio.run(_identify_all(needs_id))
+    print(f"\nIdentifying {len(needs_id)} song(s) via Whisper + Claude...")
+    print("(Whisper model cached at ~/.cache/whisper after first download)\n")
+    model = whisper.load_model("medium")
 
-    for num, title, artist, path in shazam_results:
-        path_map[num] = path
+    for song_num, start, end, video_path in needs_id:
+        sample_path = f"/tmp/gig_whisper_{song_num}.wav"
+        song_duration = end - start
+        sample_start = min(40, song_duration * 0.3)
 
-    unmatched = [(num, path) for num, title, artist, path in shazam_results if title is None]
-    if unmatched:
-        print(f"\n{len(unmatched)} song(s) unmatched by Shazam — transcribing lyrics with Whisper...")
-        print("(model cached at ~/.cache/whisper — only downloaded once)\n")
-        model = whisper.load_model("medium")
-        for song_num, video_path in unmatched:
-            ext = os.path.splitext(video_path)[1]
-            sample_path = os.path.join("/tmp", f"gig_whisper_{song_num}.wav")
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-ss", str(sample_start), "-t", "60",
+            "-i", video_path,
+            "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+            sample_path
+        ], capture_output=True)
 
-            start, end = next((s, e) for n, s, e, p in songs_info if n == song_num)
-            song_duration = end - start
-            sample_start = min(40, song_duration * 0.3)
+        size = os.path.getsize(sample_path) if os.path.exists(sample_path) else 0
+        if size < 10000:
+            print(f"  Song {song_num}: sample too small ({size} bytes) — skipping", flush=True)
+            path_map[song_num] = video_path
+            continue
 
+        print(f"  Transcribing song {song_num} ({size//1000}KB sample)...", flush=True)
+        result = model.transcribe(sample_path, language="en", fp16=False)
+        transcript = result["text"].strip()
+        if os.path.exists(sample_path):
+            os.remove(sample_path)
+
+        print(f"  Song {song_num} lyrics: \"{transcript}\"", flush=True)
+
+        if looks_like_banter(transcript):
+            print(f"  Detected banter — retrying at 60s offset...", flush=True)
             subprocess.run([
                 "ffmpeg", "-y",
-                "-ss", str(sample_start), "-t", "60",
+                "-ss", "60", "-t", "60",
                 "-i", video_path,
                 "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
                 sample_path
             ], capture_output=True)
-
-            size = os.path.getsize(sample_path) if os.path.exists(sample_path) else 0
-            if size < 10000:
-                print(f"  Song {song_num}: sample too small ({size} bytes) — skipping", flush=True)
-                continue
-
-            print(f"  Transcribing song {song_num} ({size//1000}KB sample)...", flush=True)
             result = model.transcribe(sample_path, language="en", fp16=False)
             transcript = result["text"].strip()
+            print(f"  Retry lyrics: \"{transcript}\"", flush=True)
             if os.path.exists(sample_path):
                 os.remove(sample_path)
 
-            print(f"  Song {song_num} lyrics: \"{transcript}\"", flush=True)
+        if transcript:
+            title, artist = identify_with_claude(transcript, song_num)
+            if title:
+                print(f"  Song {song_num}: \"{title}\" by {artist}", flush=True)
+                safe = re.sub(r'[^\w\s-]', '', f"{artist} - {title}").strip()
+                safe = re.sub(r'\s+', '_', safe)
+                new_path = os.path.join(
+                    os.path.dirname(video_path),
+                    f"song_{song_num:02d}_{safe}{os.path.splitext(video_path)[1]}"
+                )
+                os.rename(video_path, new_path)
+                print(f"  Renamed → {os.path.basename(new_path)}", flush=True)
+                path_map[song_num] = new_path
+                continue
 
-            if looks_like_banter(transcript):
-                print(f"  Detected banter — retrying at 60s offset...", flush=True)
-                subprocess.run([
-                    "ffmpeg", "-y",
-                    "-ss", "60", "-t", "60",
-                    "-i", video_path,
-                    "-vn", "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
-                    sample_path
-                ], capture_output=True)
-                result = model.transcribe(sample_path, language="en", fp16=False)
-                transcript = result["text"].strip()
-                print(f"  Retry lyrics: \"{transcript}\"", flush=True)
-                if os.path.exists(sample_path):
-                    os.remove(sample_path)
+        print(f"  Song {song_num}: could not identify — leaving as {os.path.basename(video_path)}", flush=True)
+        path_map[song_num] = video_path
 
-            if transcript:
-                title, artist = identify_with_claude(transcript, song_num)
-                if title:
-                    print(f"  Song {song_num}: \"{title}\" by {artist}", flush=True)
-                    safe = re.sub(r'[^\w\s-]', '', f"{artist} - {title}").strip()
-                    safe = re.sub(r'\s+', '_', safe)
-                    new_path = os.path.join(
-                        os.path.dirname(video_path),
-                        f"song_{song_num:02d}_{safe}{os.path.splitext(video_path)[1]}"
-                    )
-                    os.rename(video_path, new_path)
-                    print(f"  Renamed → {os.path.basename(new_path)}", flush=True)
-                    path_map[song_num] = new_path
-
-    # Return songs_info with updated paths
     return [(num, s, e, path_map.get(num, p)) for num, s, e, p in songs_info]
 
 
