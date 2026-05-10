@@ -461,8 +461,7 @@ def generate_ass(words_flat: list, clip_start: float, clip_length: int, output_p
 
 def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30, max_reels: int = None) -> None:
     print(f"\nCreating Instagram reels → {reels_dir}", flush=True)
-    print("Loading Whisper small model for word timestamps (faster than medium, cached)...", flush=True)
-    model = whisper.load_model("small")
+    model = None  # loaded on first use, only if needed
 
     reels_made = 0
     for song_num, start, end, video_path in songs_info:
@@ -471,13 +470,6 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30,
         if not os.path.exists(video_path):
             print(f"  Song {song_num}: file not found at {video_path}, skipping", flush=True)
             continue
-
-        song_duration = end - start
-        base     = os.path.splitext(os.path.basename(video_path))[0]
-        reel_path    = os.path.join(reels_dir, f"{base}_reel.mp4")
-        tmp_portrait = f"/tmp/gig_portrait_{song_num}.mp4"
-        tmp_ass      = f"/tmp/gig_captions_{song_num}.ass"
-        tmp_wav      = f"/tmp/gig_song_{song_num}.wav"
 
         # Skip unidentified songs (still have plain song_NN.EXT name)
         basename = os.path.splitext(os.path.basename(video_path))[0]
@@ -493,6 +485,17 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30,
         if existing_reel:
             print(f"  Song {song_num}: reel already exists ({existing_reel}) — skipping", flush=True)
             continue
+
+        song_duration = end - start
+        base         = os.path.splitext(os.path.basename(video_path))[0]
+        reel_path    = os.path.join(reels_dir, f"{base}_reel.mp4")
+        tmp_portrait = f"/tmp/gig_portrait_{song_num}.mp4"
+        tmp_ass      = f"/tmp/gig_captions_{song_num}.ass"
+        tmp_wav      = f"/tmp/gig_song_{song_num}.wav"
+
+        if model is None:
+            print("Loading Whisper small model (cached after first use)...", flush=True)
+            model = whisper.load_model("small")
 
         print(f"\n  [{song_num}] {os.path.basename(video_path)}", flush=True)
 
@@ -614,8 +617,13 @@ def main():
             max_songs = int(args[i + 1]); i += 2
         elif args[i] == "--reels-only":
             reels_only = True; i += 1
-        elif args[i] == "--reels" and i + 1 < len(args):
-            max_reels = int(args[i + 1]); i += 2
+        elif args[i] == "--reels":
+            if i + 1 < len(args) and args[i + 1].lstrip('-').isdigit():
+                max_reels = int(args[i + 1]); i += 2
+            else:
+                print("Usage: --reels N  (N is a number)"); sys.exit(1)
+        elif args[i].startswith("-"):
+            print(f"Unknown option: {args[i]}"); sys.exit(1)
         else:
             threshold = float(args[i]); i += 1
 
