@@ -459,11 +459,14 @@ def generate_ass(words_flat: list, clip_start: float, clip_length: int, output_p
         f.write(header + "\n".join(dialogues))
 
 
-def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30) -> None:
+def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30, max_reels: int = None) -> None:
     print(f"\nCreating Instagram reels → {reels_dir}", flush=True)
     model = whisper.load_model("medium")
 
+    reels_made = 0
     for song_num, start, end, video_path in songs_info:
+        if max_reels and reels_made >= max_reels:
+            break
         if not os.path.exists(video_path):
             print(f"  Song {song_num}: file not found at {video_path}, skipping", flush=True)
             continue
@@ -551,53 +554,98 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30)
         else:
             size_mb = os.path.getsize(reel_path) / 1_000_000
             print(f"    Saved: {reel_path} ({size_mb:.0f} MB)", flush=True)
+            reels_made += 1
 
         for tmp in [tmp_portrait, tmp_ass]:
             if os.path.exists(tmp):
                 os.remove(tmp)
 
 
+def get_video_duration(video_path: str) -> float:
+    """Return duration in seconds via ffprobe."""
+    r = subprocess.run([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path
+    ], capture_output=True, text=True)
+    return float(r.stdout.strip())
+
+
+def songs_info_from_dir(out_dir: str, ext: str, max_reels: int = None) -> list:
+    """Scan out_dir for identified song files (song_NN_<title>.EXT) and build songs_info."""
+    pattern = re.compile(rf"^song_(\d+)_.+\{ext}$", re.IGNORECASE)
+    matches = []
+    for f in os.listdir(out_dir):
+        m = pattern.match(f)
+        if m:
+            matches.append((int(m.group(1)), os.path.join(out_dir, f)))
+    matches.sort(key=lambda x: x[0])
+    if max_reels:
+        matches = matches[:max_reels]
+
+    songs_info = []
+    for song_num, path in matches:
+        duration = get_video_duration(path)
+        songs_info.append((song_num, 0.0, duration, path))
+    return songs_info
+
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python split_gig.py path/to/gig.mov [threshold] [--songs N]")
+        print("Usage: python split_gig.py path/to/gig.mov [threshold] [--songs N] [--reels-only] [--reels N]")
         sys.exit(1)
 
-    video_path = sys.argv[1]
-    threshold  = THRESHOLD
-    max_songs  = None
+    video_path  = sys.argv[1]
+    threshold   = THRESHOLD
+    max_songs   = None
+    reels_only  = False
+    max_reels   = None
 
     args = sys.argv[2:]
     i = 0
     while i < len(args):
         if args[i] in ("--songs", "-n") and i + 1 < len(args):
-            max_songs = int(args[i + 1])
-            i += 2
+            max_songs = int(args[i + 1]); i += 2
+        elif args[i] == "--reels-only":
+            reels_only = True; i += 1
+        elif args[i] == "--reels" and i + 1 < len(args):
+            max_reels = int(args[i + 1]); i += 2
         else:
-            threshold = float(args[i])
-            i += 1
+            threshold = float(args[i]); i += 1
 
     if not os.path.exists(video_path):
         print(f"File not found: {video_path}")
         sys.exit(1)
 
-    if max_songs:
-        print(f"Limiting to first {max_songs} song(s)", flush=True)
+    out_dir   = os.path.dirname(os.path.abspath(video_path))
+    reels_dir = os.path.join(out_dir, "reels")
+    os.makedirs(reels_dir, exist_ok=True)
+    ext       = os.path.splitext(video_path)[1]
 
-    out_dir    = os.path.dirname(os.path.abspath(video_path))
+    if reels_only:
+        print(f"Reels-only mode — scanning {out_dir} for identified songs...", flush=True)
+        songs_info = songs_info_from_dir(out_dir, ext, max_reels)
+        if not songs_info:
+            print("No identified song files found. Run without --reels-only first.")
+            sys.exit(1)
+        print(f"Found {len(songs_info)} identified song(s):", flush=True)
+        for num, s, e, path in songs_info:
+            print(f"  {num}: {os.path.basename(path)} ({e:.0f}s)", flush=True)
+        create_social_clips(songs_info, reels_dir, max_reels=max_reels)
+        return
+
     audio_path = os.path.join(out_dir, "gig_audio_full.mp3")
-
     extract_audio(video_path, audio_path, PREVIEW_SECONDS)
     normalized, times, songs, threshold = detect_songs(audio_path, threshold)
     if max_songs:
+        print(f"Limiting to first {max_songs} song(s)", flush=True)
         songs = songs[:max_songs]
     plot_results(normalized, times, songs, threshold, out_dir)
     print_results(songs)
     songs_info = extract_songs(video_path, songs, out_dir)
     songs_info = identify_songs(songs_info)
-
-    reels_dir = os.path.join(out_dir, "reels")
-    os.makedirs(reels_dir, exist_ok=True)
-    create_social_clips(songs_info, reels_dir)
+    create_social_clips(songs_info, reels_dir, max_reels=max_reels)
 
 
 if __name__ == "__main__":
