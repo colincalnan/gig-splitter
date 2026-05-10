@@ -1,0 +1,9 @@
+venv/
+.DS_Store
+*.mp3
+*.wav
+*.mp4
+*.MOV
+gig_energy_plot.png
+__pycache__/
+*.pyc

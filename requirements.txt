@@ -1,0 +1,6 @@
+librosa
+matplotlib
+"numpy<2"
+shazamio
+openai-whisper
+ddgs
