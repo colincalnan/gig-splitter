@@ -619,14 +619,20 @@ def main():
     else:
         extract_audio(video_path, audio_path, PREVIEW_SECONDS)
 
+    cached_threshold = None
     if os.path.exists(songs_json):
         with open(songs_json) as f:
             data = json.load(f)
+        cached_threshold = data["threshold"]
+
+    if cached_threshold is not None and cached_threshold == threshold:
         songs = [tuple(s) for s in data["songs"]]
-        print(f"[2-3/4] Song timestamps loaded from cache ({len(songs)} songs, threshold={data['threshold']}) — skipping detection", flush=True)
+        print(f"[2-3/4] Song timestamps loaded from cache ({len(songs)} songs, threshold={cached_threshold}) — skipping detection", flush=True)
         if os.path.exists(plot_path):
             print(f"        Plot already exists — skipping", flush=True)
     else:
+        if cached_threshold is not None and cached_threshold != threshold:
+            print(f"[2-3/4] Threshold changed ({cached_threshold} → {threshold}) — re-running detection", flush=True)
         normalized, times, songs, threshold = detect_songs(audio_path, threshold)
         with open(songs_json, "w") as f:
             json.dump({"threshold": threshold, "songs": [list(s) for s in songs]}, f)
