@@ -492,7 +492,6 @@ def create_social_clips(songs_info: list, reels_dir: str, clip_length: int = 30,
         ), None)
         if existing_reel:
             print(f"  Song {song_num}: reel already exists ({existing_reel}) — skipping", flush=True)
-            reels_made += 1  # counts toward the --reels limit
             continue
 
         print(f"\n  [{song_num}] {os.path.basename(video_path)}", flush=True)
