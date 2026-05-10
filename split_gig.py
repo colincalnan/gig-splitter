@@ -629,6 +629,24 @@ def main():
         songs = songs[:max_songs]
     print_results(songs)
     songs_info = extract_songs(video_path, songs, out_dir)
+
+    # Pick up any song files already on disk that aren't in this detection run
+    # (e.g. extracted in a previous run with different --songs limit)
+    known_nums = {num for num, *_ in songs_info}
+    pattern = re.compile(rf"^song_(\d+).*\{re.escape(ext)}$", re.IGNORECASE)
+    extras = []
+    for f in sorted(os.listdir(out_dir)):
+        m = pattern.match(f)
+        if m:
+            num = int(m.group(1))
+            if num not in known_nums:
+                path = os.path.join(out_dir, f)
+                duration = get_video_duration(path)
+                extras.append((num, 0.0, duration, path))
+                print(f"  Found extra song on disk not in detection run: {f}", flush=True)
+    if extras:
+        songs_info = sorted(songs_info + extras, key=lambda x: x[0])
+
     songs_info = identify_songs(songs_info)
     create_social_clips(songs_info, reels_dir, max_reels=max_reels)
 
