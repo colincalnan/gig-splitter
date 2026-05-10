@@ -614,8 +614,18 @@ def main():
     songs_json     = os.path.join(out_dir, "gig_songs.json")
     plot_path      = os.path.join(out_dir, "gig_energy_plot.png")
 
+    video_duration = get_video_duration(video_path)
+
     if os.path.exists(audio_path):
-        print(f"[1/4] Audio already extracted — skipping ({os.path.basename(audio_path)})", flush=True)
+        audio_duration = get_video_duration(audio_path)
+        if video_duration - audio_duration > 60:
+            print(f"[1/4] Cached audio is {(video_duration - audio_duration)/60:.1f} min shorter than video — re-extracting", flush=True)
+            os.remove(audio_path)
+            if os.path.exists(songs_json):
+                os.remove(songs_json)
+            extract_audio(video_path, audio_path, PREVIEW_SECONDS)
+        else:
+            print(f"[1/4] Audio already extracted — skipping ({os.path.basename(audio_path)})", flush=True)
     else:
         extract_audio(video_path, audio_path, PREVIEW_SECONDS)
 
