@@ -579,7 +579,7 @@ def get_video_duration(video_path: str) -> float:
     return float(r.stdout.strip())
 
 
-def songs_info_from_dir(out_dir: str, ext: str, max_reels: int = None) -> list:
+def songs_info_from_dir(out_dir: str, ext: str) -> list:
     """Scan out_dir for identified song files (song_NN_<title>.EXT) and build songs_info."""
     pattern = re.compile(rf"^song_(\d+)_.+\{ext}$", re.IGNORECASE)
     matches = []
@@ -588,8 +588,6 @@ def songs_info_from_dir(out_dir: str, ext: str, max_reels: int = None) -> list:
         if m:
             matches.append((int(m.group(1)), os.path.join(out_dir, f)))
     matches.sort(key=lambda x: x[0])
-    if max_reels:
-        matches = matches[:max_reels]
 
     songs_info = []
     for song_num, path in matches:
@@ -632,7 +630,7 @@ def main():
 
     if reels_only:
         print(f"Reels-only mode — scanning {out_dir} for identified songs...", flush=True)
-        songs_info = songs_info_from_dir(out_dir, ext, max_reels)
+        songs_info = songs_info_from_dir(out_dir, ext)
         if not songs_info:
             print("No identified song files found. Run without --reels-only first.")
             sys.exit(1)
