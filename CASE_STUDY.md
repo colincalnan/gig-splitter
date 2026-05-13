@@ -64,7 +64,7 @@ Three problems to solve:
 
 **Which 30 seconds?** Find the chorus — the most-repeated n-gram (4 to 8 words) in the transcription is almost always the hook. Locate its first occurrence in word-level timestamps and start the clip there. Fallback: 25% into the song to skip the intro.
 
-**Portrait conversion?** A single ffmpeg filter chain: split the landscape frame into two streams, blur one to 1080x1920 for the background, scale the other to fit the width, overlay centered. The blurred background look is standard on music content. No new libraries needed.
+**Portrait video polish?** The recording is already vertical (portrait iPhone). A single ffmpeg filter chain blurs a copy of the frame to fill the 9:16 background and overlays the original centered on top. The blurred background look is standard on music content. No new libraries needed.
 
 **Captions?** ASS subtitle format supports karaoke timing via `\kf{}` tags. Whisper's `word_timestamps=True` gives a start and end time per word. Group into lines of five words, build the ASS file, burn it in with ffmpeg. Words highlight as they are sung, frame-accurate.
 
