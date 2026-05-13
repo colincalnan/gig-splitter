@@ -44,7 +44,7 @@ This is the part worth documenting. It was not a straight line.
 
 The first instinct was frequency analysis — a live band has strong bass energy between songs. But this was solo acoustic guitar. No bass signal to separate songs from silence.
 
-The second instinct was wrong in a different direction. The assumption was: crowd noise between songs is louder than playing. The actual data showed the opposite. My playing and singing is consistently higher energy than the ambient crowd. Songs are the loud parts.
+The second instinct was wrong in a different direction. The assumption was: the constant background conversation of a social event would be louder than one person playing acoustic guitar. The actual data showed the opposite. My playing and singing is consistently higher energy than a room full of people talking. Songs are the loud parts.
 
 Once that was inverted, RMS energy analysis worked. A 15-second smoothing window prevents quiet strums mid-song from triggering a false split. Anything above a tuned threshold and longer than 90 seconds is a song.
 
