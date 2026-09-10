@@ -1,7 +1,7 @@
 # Case Study: From iPhone Recording to Instagram Reels with Claude Code
 
 **Project:** gig-splitter  
-**Built by:** Colin Calnan, Fractional AI Consultant  
+**Built by:** Colin Calnan  
 **Time to working prototype:** One session  
 **Stack:** Python, ffmpeg, OpenAI Whisper, Claude, librosa
 
@@ -23,10 +23,10 @@ Or: describe the problem to Claude Code and let it build the tool.
 
 A single Python script that takes the raw iPhone video and produces:
 
-1. **Song detection** — automatically finds where each song starts and ends using audio energy analysis, no manual timestamps needed
-2. **Song identification** — names each song (artist and title) using Whisper transcription + Claude
-3. **Song extraction** — cuts each song as a clean, lossless video file
-4. **Instagram Reels** — generates portrait-format (9:16) clips from the best 30 seconds of each song, with karaoke-style word-synced captions burned in
+1. **Song detection**: automatically finds where each song starts and ends using audio energy analysis, no manual timestamps needed
+2. **Song identification**: names each song (artist and title) using Whisper transcription + Claude
+3. **Song extraction**: cuts each song as a clean, lossless video file
+4. **Instagram Reels**: generates portrait-format (9:16) clips from the best 30 seconds of each song, with karaoke-style word-synced captions burned in
 
 One command. Walk away. Come back to a `reels/` folder ready for Instagram.
 
@@ -42,7 +42,7 @@ This is the part worth documenting. It was not a straight line.
 
 ### Song Boundary Detection
 
-The first instinct was frequency analysis — a live band has strong bass energy between songs. But this was solo acoustic guitar. No bass signal to separate songs from silence.
+The first instinct was frequency analysis: a live band has strong bass energy between songs. But this was solo acoustic guitar. No bass signal to separate songs from silence.
 
 The second instinct was wrong in a different direction. The assumption was: the constant background conversation of a social event would be louder than one person playing acoustic guitar. The actual data showed the opposite. My playing and singing is consistently higher energy than a room full of people talking. Songs are the loud parts.
 
@@ -54,7 +54,7 @@ Calibration: check known timestamps against the energy plot, tune the threshold,
 
 Shazam failed on every track. Audio fingerprinting works by matching a recording against the original studio version. A solo acoustic cover on an iPhone in a bar sounds nothing like the original. No match.
 
-We skipped Shazam entirely. Whisper transcribes the audio — imperfect but phonetically close. "Standing in the hall of shame" instead of "Hall of Fame." Feed the garbled transcript to Claude with the right prompt: "These are lyrics from a live acoustic cover, transcribed by Whisper. Errors expected. Identify the song." Claude gets it right every time.
+We skipped Shazam entirely. Whisper transcribes the audio, imperfect but phonetically close. "Standing in the hall of shame" instead of "Hall of Fame." Feed the garbled transcript to Claude with the right prompt: "These are lyrics from a live acoustic cover, transcribed by Whisper. Errors expected. Identify the song." Claude gets it right most of the time.
 
 This is better than Shazam for live acoustic music. Not a workaround. The better approach.
 
@@ -62,7 +62,7 @@ This is better than Shazam for live acoustic music. Not a workaround. The better
 
 Three problems to solve:
 
-**Which 30 seconds?** Find the chorus — the most-repeated n-gram (4 to 8 words) in the transcription is almost always the hook. Locate its first occurrence in word-level timestamps and start the clip there. Fallback: 25% into the song to skip the intro.
+**Which 30 seconds?** Find the chorus: the most-repeated n-gram (4 to 8 words) in the transcription is almost always the hook. Locate its first occurrence in word-level timestamps and start the clip there. Fallback: 25% into the song to skip the intro.
 
 **Portrait video polish?** The recording is already vertical (portrait iPhone). A single ffmpeg filter chain blurs a copy of the frame to fill the 9:16 background and overlays the original centered on top. The blurred background look is standard on music content. No new libraries needed.
 
@@ -90,13 +90,13 @@ Kill the process and restart: picks up exactly where it left off.
 
 ### The Caching Bug
 
-After the resume logic was in place, detection kept stopping at 15 songs — even though the gig had 28. The threshold was tuned, detection re-ran, and still found only 15.
+After the resume logic was in place, detection kept stopping at 15 songs, even though the gig had 28. The threshold was tuned, detection re-ran, and still found only 15.
 
-The problem: `gig_audio_full.mp3` had been extracted during an early test run when the code had a preview-duration limit. The file was cached. The resume logic saw it existed and skipped re-extraction. Detection was correctly analyzing a complete audio file — just one that only covered the first 63 minutes of a 2-hour gig.
+The problem: `gig_audio_full.mp3` had been extracted during an early test run when the code had a preview-duration limit. The file was cached. The resume logic saw it existed and skipped re-extraction. Detection was correctly analyzing a complete audio file, just one that only covered the first 63 minutes of a 2-hour gig.
 
 The fix: compare the cached audio duration against the source video duration on every run. If the audio is more than 60 seconds shorter than the video, delete the cache and re-extract. One line of guard logic prevents an invisible data loss that would have been nearly impossible to diagnose without the duration check.
 
-This is the kind of bug that AI-assisted development surfaces faster — because the iteration loop is short enough to notice "15 songs again, that's suspicious" and keep pulling the thread.
+This is the kind of bug that AI-assisted development surfaces faster, because the iteration loop is short enough to notice "15 songs again, that's suspicious" and keep pulling the thread.
 
 ### Threshold Invalidation
 
@@ -104,7 +104,7 @@ Song detection results are cached to `gig_songs.json` so the 20-minute audio ana
 
 ### Unknown Song Marking
 
-Songs that Whisper and Claude can't identify (MC announcements, banter, corrupted audio) get renamed from `song_01.MOV` to `song_01_unknown.MOV`. On re-run they are skipped immediately. Previously a failed identification left the file with the plain name, making it look like it had never been attempted — so Whisper retranscribed it every time.
+Songs that Whisper and Claude can't identify (MC announcements, banter, corrupted audio) get renamed from `song_01.MOV` to `song_01_unknown.MOV`. On re-run they are skipped immediately. Previously a failed identification left the file with the plain name, making it look like it had never been attempted, so Whisper retranscribed it every time.
 
 ---
 
@@ -114,7 +114,7 @@ Songs that Whisper and Claude can't identify (MC announcements, banter, corrupte
 |---|---|---|
 | Only 15 of 28 songs found | Audio cache truncated from early test run | Duration check on cache load; auto-invalidate if short |
 | Song detection stops at wrong threshold | Cache ignores new CLI threshold | Compare cached vs. current threshold; invalidate on mismatch |
-| Shazam panics on MP3 | Rust divide-by-zero on certain encodings | Removed Shazam entirely — Whisper + Claude is the better path |
+| Shazam panics on MP3 | Rust divide-by-zero on certain encodings | Removed Shazam entirely. Whisper + Claude is the better path |
 | Failed songs retranscribed every run | `song_01.MOV` looks like "never tried" | Rename to `song_01_unknown.MOV` after failed identification |
 | Empty Whisper transcriptions | Absolute timestamps used on already-relative song files | Fixed to relative offsets |
 | Song 1 catches pre-show banter | Banter is high-energy too | `looks_like_banter()` detection, retry at 60s offset |
@@ -153,25 +153,14 @@ Files go directly to iPhone via AirDrop, upload straight to Instagram Reels.
 
 The bugs were real: inverted energy assumption, Shazam failing on acoustic covers, timestamp offsets, a silent audio truncation that took three days to surface. None were solvable by prompting. They required debugging, instrumentation, testing against known data, and iteration.
 
-The AI accelerated all of it. Not by writing perfect code on the first try — by shortening the gap between "something is wrong" and "here is the fix" enough to keep the debugging loop moving.
+The AI accelerated all of it. Not by writing perfect code on the first try, but by shortening the gap between "something is wrong" and "here is the fix" enough to keep the debugging loop moving.
 
 The result is a real tool, running on real data, used on real gigs.
 
 ---
 
-## I Build This for Clients
+## More
 
-If you have a workflow that feels like it should be automatable, it probably is.
+The build page, with a reel it cut, the code, and what it still gets wrong: https://colincalnan.github.io/portfolio/builds/gig-splitter/
 
-The gig-splitter took one session to get working and a few more days to make robust. The kind of things that typically take that long:
-
-- Document processing pipelines (invoices, contracts, reports)
-- Data extraction from unstructured sources
-- Content generation pipelines tied to real business triggers
-- Internal tools that replace repetitive manual steps
-
-If you can describe what you do, I can usually describe what a tool would look like. If the description makes sense, we build it.
-
-**Colin Calnan** — Fractional AI Consultant  
-[colin.calnan@gmail.com](mailto:colin.calnan@gmail.com)  
-[GitHub: colincalnan/gig-splitter](https://github.com/colincalnan/gig-splitter)
+Colin Calnan, Lake Country, BC
